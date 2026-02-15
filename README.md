@@ -1,4 +1,4 @@
-> [!INFO]
+> [!NOTE]
 > This is a fork of github.com/sqweek/dialog.
 
 # dialog
