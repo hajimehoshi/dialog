@@ -67,16 +67,21 @@ func utf16FromStringWithoutNullTermination(s string) []uint16 {
 }
 
 func openfile(flags uint32, b *FileBuilder) (d filedlg) {
+	// Use GetForegroundWindow to get the current window.
+	// GetActiveWindow returns the window that belongs to the current thread.
+	// TODO: Use GetActiveWindow for predictable behavior.
+	d.opf = &w32.OPENFILENAME{
+		Owner: w32.HWND(_GetForegroundWindow()),
+	}
+
 	d.filename = b.StartFile
 	startFile, err := windows.UTF16FromString(b.StartFile)
 	if err != nil {
 		panic(fmt.Sprintf("dialog: UTF16FromString failed: %v", err))
 	}
-	d.opf = &w32.OPENFILENAME{
-		File:    &startFile[0],
-		MaxFile: uint32(len(startFile)),
-		Flags:   flags,
-	}
+	d.opf.File = &startFile[0]
+	d.opf.MaxFile = uint32(len(startFile))
+	d.opf.Flags = flags
 
 	d.opf.StructSize = uint32(unsafe.Sizeof(*d.opf))
 
@@ -145,7 +150,13 @@ func callbackDefaultDir(hwnd w32.HWND, msg uint, lParam, lpData uintptr) int {
 }
 
 func selectdir(b *DirectoryBuilder) (d dirdlg) {
-	d.bi = &w32.BROWSEINFO{Flags: w32.BIF_RETURNONLYFSDIRS | w32.BIF_NEWDIALOGSTYLE}
+	// Use GetForegroundWindow to get the current window.
+	// GetActiveWindow returns the window that belongs to the current thread.
+	// TODO: Use GetActiveWindow for predictable behavior.
+	d.bi = &w32.BROWSEINFO{
+		Flags: w32.BIF_RETURNONLYFSDIRS | w32.BIF_NEWDIALOGSTYLE,
+		Owner: w32.HWND(_GetForegroundWindow()),
+	}
 	if b.Dlg.Title != "" {
 		d.bi.Title, _ = syscall.UTF16PtrFromString(b.Dlg.Title)
 	}
