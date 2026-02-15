@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"github.com/sqweek/dialog"
+	"github.com/hajimehoshi/dialog"
 )
 
 func main() {

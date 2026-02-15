@@ -1,3 +1,6 @@
+> [!INFO]
+> This is a fork of github.com/sqweek/dialog.
+
 # dialog
 Simple cross-platform dialog API for go-lang
 
