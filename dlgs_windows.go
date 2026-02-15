@@ -2,12 +2,12 @@ package dialog
 
 import (
 	"fmt"
-	"reflect"
 	"syscall"
 	"unicode/utf16"
 	"unsafe"
 
 	"github.com/TheTitanrain/w32"
+	"golang.org/x/sys/windows"
 )
 
 type WinDlgError int
@@ -38,17 +38,12 @@ func (b *MsgBuilder) error() {
 }
 
 type filedlg struct {
-	buf     []uint16
-	filters []uint16
-	opf     *w32.OPENFILENAME
+	filename string
+	opf      *w32.OPENFILENAME
 }
 
 func (d filedlg) Filename() string {
-	i := 0
-	for i < len(d.buf) && d.buf[i] != 0 {
-		i++
-	}
-	return string(utf16.Decode(d.buf[:i]))
+	return d.filename
 }
 
 func (b *FileBuilder) load() (string, error) {
@@ -67,60 +62,56 @@ func (b *FileBuilder) save() (string, error) {
 	return "", err()
 }
 
-/* syscall.UTF16PtrFromString not sufficient because we need to encode embedded NUL bytes */
-func utf16ptr(utf16 []uint16) *uint16 {
-	if utf16[len(utf16)-1] != 0 {
-		panic("refusing to make ptr to non-NUL terminated utf16 slice")
-	}
-	h := (*reflect.SliceHeader)(unsafe.Pointer(&utf16))
-	return (*uint16)(unsafe.Pointer(h.Data))
-}
-
-func utf16slice(ptr *uint16) []uint16 {
-	hdr := reflect.SliceHeader{Data: uintptr(unsafe.Pointer(ptr)), Len: 1, Cap: 1}
-	slice := *((*[]uint16)(unsafe.Pointer(&hdr)))
-	i := 0
-	for slice[len(slice)-1] != 0 {
-		i++
-	}
-	hdr.Len = i
-	slice = *((*[]uint16)(unsafe.Pointer(&hdr)))
-	return slice
+func utf16FromStringWithoutNullTermination(s string) []uint16 {
+	return utf16.Encode([]rune(s))
 }
 
 func openfile(flags uint32, b *FileBuilder) (d filedlg) {
-	d.buf = make([]uint16, w32.MAX_PATH)
-	if b.StartFile != "" {
-		initialName, _ := syscall.UTF16FromString(b.StartFile)
-		for i := 0; i < len(initialName) && i < w32.MAX_PATH; i++ {
-			d.buf[i] = initialName[i]
-		}
+	d.filename = b.StartFile
+	startFile, err := windows.UTF16FromString(b.StartFile)
+	if err != nil {
+		panic(fmt.Sprintf("dialog: UTF16FromString failed: %v", err))
 	}
 	d.opf = &w32.OPENFILENAME{
-		File:    utf16ptr(d.buf),
-		MaxFile: uint32(len(d.buf)),
+		File:    &startFile[0],
+		MaxFile: uint32(len(startFile)),
 		Flags:   flags,
 	}
+
 	d.opf.StructSize = uint32(unsafe.Sizeof(*d.opf))
+
 	if b.StartDir != "" {
-		d.opf.InitialDir, _ = syscall.UTF16PtrFromString(b.StartDir)
+		initialDir, err := windows.UTF16PtrFromString(b.StartDir)
+		if err != nil {
+			panic(fmt.Sprintf("dialog: UTF16PtrFromString failed: %v", err))
+		}
+		d.opf.InitialDir = initialDir
 	}
+
 	if b.Dlg.Title != "" {
-		d.opf.Title, _ = syscall.UTF16PtrFromString(b.Dlg.Title)
+		title, err := windows.UTF16PtrFromString(b.Dlg.Title)
+		if err != nil {
+			panic(fmt.Sprintf("dialog: UTF16PtrFromString failed: %v", err))
+		}
+		d.opf.Title = title
 	}
+
+	var filters []uint16
 	for _, filt := range b.Filters {
-		/* build utf16 string of form "Music File\0*.mp3;*.ogg;*.wav;\0" */
-		d.filters = append(d.filters, utf16.Encode([]rune(filt.Desc))...)
-		d.filters = append(d.filters, 0)
+		// Build UTF-16 string of form "Music File\0*.mp3;*.ogg;*.wav;\0".
+		filters = append(filters, utf16FromStringWithoutNullTermination(filt.Desc)...)
+		filters = append(filters, 0)
 		for _, ext := range filt.Extensions {
 			s := fmt.Sprintf("*.%s;", ext)
-			d.filters = append(d.filters, utf16.Encode([]rune(s))...)
+			filters = append(filters, utf16FromStringWithoutNullTermination(s)...)
+			filters = append(filters, 0)
 		}
-		d.filters = append(d.filters, 0)
+		filters = append(filters, 0)
 	}
-	if d.filters != nil {
-		d.filters = append(d.filters, 0, 0) // two extra NUL chars to terminate the list
-		d.opf.Filter = utf16ptr(d.filters)
+	if len(filters) > 0 {
+		// Add two extra NUL chars to terminate the list.
+		filters = append(filters, 0, 0)
+		d.opf.Filter = &filters[0]
 	}
 	return d
 }
