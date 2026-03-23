@@ -1,9 +1,9 @@
 // Package dialog provides a simple cross-platform common dialog API.
 // Eg. to prompt the user with a yes/no dialog:
 //
-//     if dialog.MsgDlg("%s", "Do you want to continue?").YesNo() {
-//         // user pressed Yes
-//     }
+//	if dialog.MsgDlg("%s", "Do you want to continue?").YesNo() {
+//	    // user pressed Yes
+//	}
 //
 // The general usage pattern is to call one of the toplevel *Dlg functions
 // which return a *Builder structure. From here you can optionally call
