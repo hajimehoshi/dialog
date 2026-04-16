@@ -38,12 +38,12 @@ func (b *MsgBuilder) error() {
 }
 
 type filedlg struct {
-	filename string
-	opf      *w32.OPENFILENAME
+	opf     *w32.OPENFILENAME
+	fileBuf []uint16
 }
 
 func (d filedlg) Filename() string {
-	return d.filename
+	return windows.UTF16ToString(d.fileBuf)
 }
 
 func (b *FileBuilder) load() (string, error) {
@@ -74,13 +74,18 @@ func openfile(flags uint32, b *FileBuilder) (d filedlg) {
 		Owner: w32.HWND(_GetForegroundWindow()),
 	}
 
-	d.filename = b.StartFile
 	startFile, err := windows.UTF16FromString(b.StartFile)
 	if err != nil {
 		panic(fmt.Sprintf("dialog: UTF16FromString failed: %v", err))
 	}
-	d.opf.File = &startFile[0]
-	d.opf.MaxFile = uint32(len(startFile))
+	// The buffer pointed to by opf.File receives the selected file path, so it
+	// must be large enough to hold any path the user might pick, not just
+	// StartFile. Use a 32Ki-wchar buffer to accommodate long paths.
+	const fileBufLen = 32 * 1024
+	d.fileBuf = make([]uint16, fileBufLen)
+	copy(d.fileBuf, startFile)
+	d.opf.File = &d.fileBuf[0]
+	d.opf.MaxFile = uint32(len(d.fileBuf))
 	d.opf.Flags = flags
 
 	d.opf.StructSize = uint32(unsafe.Sizeof(*d.opf))
