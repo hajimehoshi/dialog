@@ -6,7 +6,6 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
-	"github.com/TheTitanrain/w32"
 	"golang.org/x/sys/windows"
 )
 
@@ -17,7 +16,7 @@ func (e WinDlgError) Error() string {
 }
 
 func err() error {
-	e := w32.CommDlgExtendedError()
+	e := _CommDlgExtendedError()
 	if e == 0 {
 		return ErrCancelled
 	}
@@ -25,20 +24,20 @@ func err() error {
 }
 
 func (b *MsgBuilder) yesNo() bool {
-	r := w32.MessageBox(w32.HWND(0), b.Msg, firstOf(b.Dlg.Title, "Confirm?"), w32.MB_YESNO)
-	return r == w32.IDYES
+	r, _ := _MessageBox(0, b.Msg, firstOf(b.Dlg.Title, "Confirm?"), _MB_YESNO)
+	return r == _IDYES
 }
 
 func (b *MsgBuilder) info() {
-	w32.MessageBox(w32.HWND(0), b.Msg, firstOf(b.Dlg.Title, "Information"), w32.MB_OK|w32.MB_ICONINFORMATION)
+	_, _ = _MessageBox(0, b.Msg, firstOf(b.Dlg.Title, "Information"), _MB_OK|_MB_ICONINFORMATION)
 }
 
 func (b *MsgBuilder) error() {
-	w32.MessageBox(w32.HWND(0), b.Msg, firstOf(b.Dlg.Title, "Error"), w32.MB_OK|w32.MB_ICONERROR)
+	_, _ = _MessageBox(0, b.Msg, firstOf(b.Dlg.Title, "Error"), _MB_OK|_MB_ICONERROR)
 }
 
 type filedlg struct {
-	opf     *w32.OPENFILENAME
+	opf     *_OPENFILENAME
 	fileBuf []uint16
 }
 
@@ -47,16 +46,16 @@ func (d filedlg) Filename() string {
 }
 
 func (b *FileBuilder) load() (string, error) {
-	d := openfile(w32.OFN_FILEMUSTEXIST|w32.OFN_NOCHANGEDIR, b)
-	if w32.GetOpenFileName(d.opf) {
+	d := openfile(_OFN_FILEMUSTEXIST|_OFN_NOCHANGEDIR, b)
+	if _GetOpenFileName(d.opf) {
 		return d.Filename(), nil
 	}
 	return "", err()
 }
 
 func (b *FileBuilder) save() (string, error) {
-	d := openfile(w32.OFN_OVERWRITEPROMPT|w32.OFN_NOCHANGEDIR, b)
-	if w32.GetSaveFileName(d.opf) {
+	d := openfile(_OFN_OVERWRITEPROMPT|_OFN_NOCHANGEDIR, b)
+	if _GetSaveFileName(d.opf) {
 		return d.Filename(), nil
 	}
 	return "", err()
@@ -70,8 +69,8 @@ func openfile(flags uint32, b *FileBuilder) (d filedlg) {
 	// Use GetForegroundWindow to get the current window.
 	// GetActiveWindow returns the window that belongs to the current thread.
 	// TODO: Use GetActiveWindow for predictable behavior.
-	d.opf = &w32.OPENFILENAME{
-		Owner: w32.HWND(_GetForegroundWindow()),
+	d.opf = &_OPENFILENAME{
+		Owner: _GetForegroundWindow(),
 	}
 
 	startFile, err := windows.UTF16FromString(b.StartFile)
@@ -127,29 +126,12 @@ func openfile(flags uint32, b *FileBuilder) (d filedlg) {
 }
 
 type dirdlg struct {
-	bi *w32.BROWSEINFO
+	bi *_BROWSEINFO
 }
 
-const (
-	bffm_INITIALIZED     = 1
-	bffm_SELCHANGED      = 2
-	bffm_VALIDATEFAILEDA = 3
-	bffm_VALIDATEFAILEDW = 4
-	bffm_SETSTATUSTEXTA  = (w32.WM_USER + 100)
-	bffm_SETSTATUSTEXTW  = (w32.WM_USER + 104)
-	bffm_ENABLEOK        = (w32.WM_USER + 101)
-	bffm_SETSELECTIONA   = (w32.WM_USER + 102)
-	bffm_SETSELECTIONW   = (w32.WM_USER + 103)
-	bffm_SETOKTEXT       = (w32.WM_USER + 105)
-	bffm_SETEXPANDED     = (w32.WM_USER + 106)
-	bffm_SETSTATUSTEXT   = bffm_SETSTATUSTEXTW
-	bffm_SETSELECTION    = bffm_SETSELECTIONW
-	bffm_VALIDATEFAILED  = bffm_VALIDATEFAILEDW
-)
-
-func callbackDefaultDir(hwnd w32.HWND, msg uint, lParam, lpData uintptr) int {
-	if msg == bffm_INITIALIZED {
-		_ = w32.SendMessage(hwnd, bffm_SETSELECTION, w32.TRUE, lpData)
+func callbackDefaultDir(hwnd windows.HWND, msg uint, lParam, lpData uintptr) int {
+	if msg == _BFFM_INITIALIZED {
+		_ = _SendMessage(hwnd, _BFFM_SETSELECTION, _TRUE, lpData)
 	}
 	return 0
 }
@@ -158,9 +140,9 @@ func selectdir(b *DirectoryBuilder) (d dirdlg) {
 	// Use GetForegroundWindow to get the current window.
 	// GetActiveWindow returns the window that belongs to the current thread.
 	// TODO: Use GetActiveWindow for predictable behavior.
-	d.bi = &w32.BROWSEINFO{
-		Flags: w32.BIF_RETURNONLYFSDIRS | w32.BIF_NEWDIALOGSTYLE,
-		Owner: w32.HWND(_GetForegroundWindow()),
+	d.bi = &_BROWSEINFO{
+		Flags: _BIF_RETURNONLYFSDIRS | _BIF_NEWDIALOGSTYLE,
+		Owner: _GetForegroundWindow(),
 	}
 	if b.Dlg.Title != "" {
 		d.bi.Title, _ = syscall.UTF16PtrFromString(b.Dlg.Title)
@@ -175,9 +157,9 @@ func selectdir(b *DirectoryBuilder) (d dirdlg) {
 
 func (b *DirectoryBuilder) browse() (string, error) {
 	d := selectdir(b)
-	res := w32.SHBrowseForFolder(d.bi)
+	res := _SHBrowseForFolder(d.bi)
 	if res == 0 {
 		return "", ErrCancelled
 	}
-	return w32.SHGetPathFromIDList(res), nil
+	return _SHGetPathFromIDList(res)
 }
