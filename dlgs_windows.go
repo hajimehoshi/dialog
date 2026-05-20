@@ -1,27 +1,13 @@
 package dialog
 
 import (
+	"errors"
 	"fmt"
-	"syscall"
-	"unicode/utf16"
-	"unsafe"
+	"runtime"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
-
-type WinDlgError int
-
-func (e WinDlgError) Error() string {
-	return fmt.Sprintf("CommDlgExtendedError: %#x", int(e))
-}
-
-func err() error {
-	e := _CommDlgExtendedError()
-	if e == 0 {
-		return ErrCancelled
-	}
-	return WinDlgError(e)
-}
 
 func (b *MsgBuilder) yesNo() bool {
 	r, _ := _MessageBox(0, b.Msg, firstOf(b.Dlg.Title, "Confirm?"), _MB_YESNO)
@@ -36,130 +22,140 @@ func (b *MsgBuilder) error() {
 	_, _ = _MessageBox(0, b.Msg, firstOf(b.Dlg.Title, "Error"), _MB_OK|_MB_ICONERROR)
 }
 
-type filedlg struct {
-	opf     *_OPENFILENAME
-	fileBuf []uint16
-}
-
-func (d filedlg) Filename() string {
-	return windows.UTF16ToString(d.fileBuf)
-}
-
 func (b *FileBuilder) load() (string, error) {
-	d := openfile(_OFN_FILEMUSTEXIST|_OFN_NOCHANGEDIR, b)
-	if _GetOpenFileName(d.opf) {
-		return d.Filename(), nil
-	}
-	return "", err()
+	return showFileDialog(fileDialogConfig{
+		clsid:     &_CLSID_FileOpenDialog,
+		options:   _FOS_FILEMUSTEXIST | _FOS_FORCEFILESYSTEM,
+		title:     b.Dlg.Title,
+		startDir:  b.StartDir,
+		startFile: b.StartFile,
+		filters:   b.Filters,
+	})
 }
 
 func (b *FileBuilder) save() (string, error) {
-	d := openfile(_OFN_OVERWRITEPROMPT|_OFN_NOCHANGEDIR, b)
-	if _GetSaveFileName(d.opf) {
-		return d.Filename(), nil
-	}
-	return "", err()
-}
-
-func utf16FromStringWithoutNullTermination(s string) []uint16 {
-	return utf16.Encode([]rune(s))
-}
-
-func openfile(flags uint32, b *FileBuilder) (d filedlg) {
-	// Use GetForegroundWindow to get the current window.
-	// GetActiveWindow returns the window that belongs to the current thread.
-	// TODO: Use GetActiveWindow for predictable behavior.
-	d.opf = &_OPENFILENAME{
-		Owner: _GetForegroundWindow(),
-	}
-
-	startFile, err := windows.UTF16FromString(b.StartFile)
-	if err != nil {
-		panic(fmt.Sprintf("dialog: UTF16FromString failed: %v", err))
-	}
-	// The buffer pointed to by opf.File receives the selected file path, so it
-	// must be large enough to hold any path the user might pick, not just
-	// StartFile. Use a 32Ki-wchar buffer to accommodate long paths.
-	const fileBufLen = 32 * 1024
-	d.fileBuf = make([]uint16, fileBufLen)
-	copy(d.fileBuf, startFile)
-	d.opf.File = &d.fileBuf[0]
-	d.opf.MaxFile = uint32(len(d.fileBuf))
-	d.opf.Flags = flags
-
-	d.opf.StructSize = uint32(unsafe.Sizeof(*d.opf))
-
-	if b.StartDir != "" {
-		initialDir, err := windows.UTF16PtrFromString(b.StartDir)
-		if err != nil {
-			panic(fmt.Sprintf("dialog: UTF16PtrFromString failed: %v", err))
-		}
-		d.opf.InitialDir = initialDir
-	}
-
-	if b.Dlg.Title != "" {
-		title, err := windows.UTF16PtrFromString(b.Dlg.Title)
-		if err != nil {
-			panic(fmt.Sprintf("dialog: UTF16PtrFromString failed: %v", err))
-		}
-		d.opf.Title = title
-	}
-
-	var filters []uint16
-	for _, filt := range b.Filters {
-		// Build UTF-16 string of form "Music File\0*.mp3;*.ogg;*.wav;\0".
-		filters = append(filters, utf16FromStringWithoutNullTermination(filt.Desc)...)
-		filters = append(filters, 0)
-		for _, ext := range filt.Extensions {
-			s := fmt.Sprintf("*.%s;", ext)
-			filters = append(filters, utf16FromStringWithoutNullTermination(s)...)
-			filters = append(filters, 0)
-		}
-		filters = append(filters, 0)
-	}
-	if len(filters) > 0 {
-		// Add two extra NUL chars to terminate the list.
-		filters = append(filters, 0, 0)
-		d.opf.Filter = &filters[0]
-	}
-	return d
-}
-
-type dirdlg struct {
-	bi *_BROWSEINFO
-}
-
-func callbackDefaultDir(hwnd windows.HWND, msg uint, lParam, lpData uintptr) int {
-	if msg == _BFFM_INITIALIZED {
-		_ = _SendMessage(hwnd, _BFFM_SETSELECTION, _TRUE, lpData)
-	}
-	return 0
-}
-
-func selectdir(b *DirectoryBuilder) (d dirdlg) {
-	// Use GetForegroundWindow to get the current window.
-	// GetActiveWindow returns the window that belongs to the current thread.
-	// TODO: Use GetActiveWindow for predictable behavior.
-	d.bi = &_BROWSEINFO{
-		Flags: _BIF_RETURNONLYFSDIRS | _BIF_NEWDIALOGSTYLE,
-		Owner: _GetForegroundWindow(),
-	}
-	if b.Dlg.Title != "" {
-		d.bi.Title, _ = syscall.UTF16PtrFromString(b.Dlg.Title)
-	}
-	if b.StartDir != "" {
-		s16, _ := syscall.UTF16PtrFromString(b.StartDir)
-		d.bi.LParam = uintptr(unsafe.Pointer(s16))
-		d.bi.CallbackFunc = syscall.NewCallback(callbackDefaultDir)
-	}
-	return d
+	return showFileDialog(fileDialogConfig{
+		clsid:     &_CLSID_FileSaveDialog,
+		options:   _FOS_OVERWRITEPROMPT | _FOS_FORCEFILESYSTEM,
+		title:     b.Dlg.Title,
+		startDir:  b.StartDir,
+		startFile: b.StartFile,
+		filters:   b.Filters,
+	})
 }
 
 func (b *DirectoryBuilder) browse() (string, error) {
-	d := selectdir(b)
-	res := _SHBrowseForFolder(d.bi)
-	if res == 0 {
-		return "", ErrCancelled
+	return showFileDialog(fileDialogConfig{
+		clsid:    &_CLSID_FileOpenDialog,
+		options:  _FOS_PICKFOLDERS | _FOS_FORCEFILESYSTEM,
+		title:    b.Dlg.Title,
+		startDir: b.StartDir,
+	})
+}
+
+type fileDialogConfig struct {
+	clsid     *windows.GUID
+	options   uint32
+	title     string
+	startDir  string
+	startFile string
+	filters   []FileFilter
+}
+
+func showFileDialog(cfg fileDialogConfig) (string, error) {
+	// COM apartments are per-thread, so the goroutine must stay on the same OS
+	// thread between CoInitializeEx and CoUninitialize.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	switch hr := _CoInitializeEx(_COINIT_APARTMENTTHREADED | _COINIT_DISABLEOLE1DDE); hr {
+	case _S_OK, _S_FALSE:
+		defer _CoUninitialize()
+	case _RPC_E_CHANGED_MODE:
+		// COM is already initialized on this thread with a different concurrency
+		// model. The dialog still works under the existing apartment, so proceed
+		// without taking ownership of the initialization.
+	default:
+		return "", fmt.Errorf("dialog: CoInitializeEx failed: %w", hr)
 	}
-	return _SHGetPathFromIDList(res)
+
+	dlg, err := _CoCreateFileDialog(cfg.clsid)
+	if err != nil {
+		return "", err
+	}
+	defer dlg.Release()
+
+	opts, err := dlg.GetOptions()
+	if err != nil {
+		return "", err
+	}
+	if err := dlg.SetOptions(opts | cfg.options); err != nil {
+		return "", err
+	}
+
+	if cfg.title != "" {
+		if err := dlg.SetTitle(utf16Ptr(cfg.title)); err != nil {
+			return "", err
+		}
+	}
+
+	if cfg.startDir != "" {
+		// A start directory that cannot be resolved should not prevent the dialog
+		// from opening, so any failure here is ignored and the default is used.
+		if item, err := _SHCreateItemFromParsingName(cfg.startDir); err == nil {
+			_ = dlg.SetFolder(item)
+			item.Release()
+		}
+	}
+
+	if cfg.startFile != "" {
+		if err := dlg.SetFileName(utf16Ptr(cfg.startFile)); err != nil {
+			return "", err
+		}
+	}
+
+	if err := dlg.SetFileTypes(fileFilterSpecs(cfg.filters)); err != nil {
+		return "", err
+	}
+
+	// Use GetForegroundWindow to get the current window.
+	// GetActiveWindow returns the window that belongs to the current thread.
+	// TODO: Use GetActiveWindow for predictable behavior.
+	if err := dlg.Show(_GetForegroundWindow()); err != nil {
+		if errors.Is(err, _ERROR_CANCELLED) {
+			return "", ErrCancelled
+		}
+		return "", err
+	}
+
+	item, err := dlg.GetResult()
+	if err != nil {
+		return "", err
+	}
+	defer item.Release()
+
+	return item.GetDisplayName(_SIGDN_FILESYSPATH)
+}
+
+func fileFilterSpecs(filters []FileFilter) []_COMDLG_FILTERSPEC {
+	var specs []_COMDLG_FILTERSPEC
+	for _, f := range filters {
+		patterns := make([]string, len(f.Extensions))
+		for i, ext := range f.Extensions {
+			patterns[i] = "*." + ext
+		}
+		specs = append(specs, _COMDLG_FILTERSPEC{
+			Name: utf16Ptr(f.Desc),
+			Spec: utf16Ptr(strings.Join(patterns, ";")),
+		})
+	}
+	return specs
+}
+
+func utf16Ptr(s string) *uint16 {
+	p, err := windows.UTF16PtrFromString(s)
+	if err != nil {
+		panic(fmt.Sprintf("dialog: UTF16PtrFromString failed: %v", err))
+	}
+	return p
 }

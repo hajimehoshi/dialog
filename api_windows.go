@@ -6,6 +6,8 @@ package dialog
 import (
 	"errors"
 	"fmt"
+	"runtime"
+	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -21,70 +23,91 @@ const (
 
 	_IDYES = 6
 
-	_OFN_OVERWRITEPROMPT = 0x00000002
-	_OFN_NOCHANGEDIR     = 0x00000008
-	_OFN_FILEMUSTEXIST   = 0x00001000
+	_CLSCTX_INPROC_SERVER = 0x1
 
-	_BIF_RETURNONLYFSDIRS = 0x00000001
-	_BIF_NEWDIALOGSTYLE   = 0x00000040
+	_COINIT_APARTMENTTHREADED = 0x2
+	_COINIT_DISABLEOLE1DDE    = 0x4
 
-	_WM_USER = 0x0400
+	_FOS_OVERWRITEPROMPT = 0x00000002
+	_FOS_PICKFOLDERS     = 0x00000020
+	_FOS_FORCEFILESYSTEM = 0x00000040
+	_FOS_FILEMUSTEXIST   = 0x00001000
 
-	_TRUE = 1
+	_SIGDN_FILESYSPATH = 0x80058000
 )
+
+type _HRESULT uint32
 
 const (
-	_BFFM_INITIALIZED     = 1
-	_BFFM_SELCHANGED      = 2
-	_BFFM_VALIDATEFAILEDA = 3
-	_BFFM_VALIDATEFAILEDW = 4
-	_BFFM_SETSTATUSTEXTA  = (_WM_USER + 100)
-	_BFFM_SETSTATUSTEXTW  = (_WM_USER + 104)
-	_BFFM_ENABLEOK        = (_WM_USER + 101)
-	_BFFM_SETSELECTIONA   = (_WM_USER + 102)
-	_BFFM_SETSELECTIONW   = (_WM_USER + 103)
-	_BFFM_SETOKTEXT       = (_WM_USER + 105)
-	_BFFM_SETEXPANDED     = (_WM_USER + 106)
-	_BFFM_SETSTATUSTEXT   = _BFFM_SETSTATUSTEXTW
-	_BFFM_SETSELECTION    = _BFFM_SETSELECTIONW
-	_BFFM_VALIDATEFAILED  = _BFFM_VALIDATEFAILEDW
+	_S_OK               _HRESULT = 0x00000000
+	_S_FALSE            _HRESULT = 0x00000001
+	_RPC_E_CHANGED_MODE _HRESULT = 0x80010106
+	_ERROR_CANCELLED    _HRESULT = 0x800704C7
 )
 
-type _OPENFILENAME struct {
-	StructSize      uint32
-	Owner           windows.HWND
-	Instance        windows.Handle
-	Filter          *uint16
-	CustomFilter    *uint16
-	MaxCustomFilter uint32
-	FilterIndex     uint32
-	File            *uint16
-	MaxFile         uint32
-	FileTitle       *uint16
-	MaxFileTitle    uint32
-	InitialDir      *uint16
-	Title           *uint16
-	Flags           uint32
-	FileOffset      uint16
-	FileExtension   uint16
-	DefExt          *uint16
-	CustData        uintptr
-	FnHook          uintptr
-	TemplateName    *uint16
-	PvReserved      unsafe.Pointer
-	DwReserved      uint32
-	FlagsEx         uint32
+func (hr _HRESULT) failed() bool {
+	return hr&0x80000000 != 0
 }
 
-type _BROWSEINFO struct {
-	Owner        windows.HWND
-	Root         *uint16
-	DisplayName  *uint16
-	Title        *uint16
-	Flags        uint32
-	CallbackFunc uintptr
-	LParam       uintptr
-	Image        int32
+func (hr _HRESULT) Error() string {
+	return fmt.Sprintf("HRESULT 0x%08x", uint32(hr))
+}
+
+var (
+	_CLSID_FileOpenDialog = windows.GUID{Data1: 0xDC1C5A9C, Data2: 0xE88A, Data3: 0x4DDE, Data4: [8]byte{0xA5, 0xA1, 0x60, 0xF8, 0x2A, 0x20, 0xAE, 0xF7}}
+	_CLSID_FileSaveDialog = windows.GUID{Data1: 0xC0B4E2F3, Data2: 0xBA21, Data3: 0x4773, Data4: [8]byte{0x8D, 0xBA, 0x33, 0x5E, 0xC9, 0x46, 0xEB, 0x8B}}
+	_IID_IFileDialog      = windows.GUID{Data1: 0x42F85136, Data2: 0xDB7E, Data3: 0x439C, Data4: [8]byte{0x85, 0xF1, 0xE4, 0x07, 0x5D, 0x13, 0x5F, 0xC8}}
+	_IID_IShellItem       = windows.GUID{Data1: 0x43826D1E, Data2: 0xE718, Data3: 0x42EE, Data4: [8]byte{0xBC, 0x55, 0xA1, 0xE2, 0x61, 0xC3, 0x7B, 0xFE}}
+)
+
+type _COMDLG_FILTERSPEC struct {
+	Name *uint16
+	Spec *uint16
+}
+
+type _IFileDialogVtbl struct {
+	QueryInterface uintptr
+	AddRef         uintptr
+	Release        uintptr
+	Show           uintptr
+
+	SetFileTypes        uintptr
+	SetFileTypeIndex    uintptr
+	GetFileTypeIndex    uintptr
+	Advise              uintptr
+	Unadvise            uintptr
+	SetOptions          uintptr
+	GetOptions          uintptr
+	SetDefaultFolder    uintptr
+	SetFolder           uintptr
+	GetFolder           uintptr
+	GetCurrentSelection uintptr
+	SetFileName         uintptr
+	GetFileName         uintptr
+	SetTitle            uintptr
+	SetOkButtonLabel    uintptr
+	SetFileNameLabel    uintptr
+	GetResult           uintptr
+}
+
+type _IFileDialog struct {
+	vtbl *_IFileDialogVtbl
+}
+
+type _IShellItemVtbl struct {
+	QueryInterface uintptr
+	AddRef         uintptr
+	Release        uintptr
+
+	BindToHandler  uintptr
+	GetParent      uintptr
+	GetDisplayName uintptr
+	GetAttributes  uintptr
+	Compare        uintptr
+}
+
+type _IShellItem struct {
+	vtbl *_IShellItemVtbl
 }
 
 var (
@@ -92,42 +115,26 @@ var (
 
 	procGetForegroundWindow = user32.NewProc("GetForegroundWindow")
 	procMessageBoxW         = user32.NewProc("MessageBoxW")
-	procSendMessageW        = user32.NewProc("SendMessageW")
 )
 
 var (
-	comdlg32 = windows.NewLazySystemDLL("comdlg32.dll")
+	ole32 = windows.NewLazySystemDLL("ole32.dll")
 
-	procCommDlgExtendedError = comdlg32.NewProc("CommDlgExtendedError")
-	procGetOpenFileNameW     = comdlg32.NewProc("GetOpenFileNameW")
-	procGetSaveFileNameW     = comdlg32.NewProc("GetSaveFileNameW")
+	procCoInitializeEx   = ole32.NewProc("CoInitializeEx")
+	procCoUninitialize   = ole32.NewProc("CoUninitialize")
+	procCoCreateInstance = ole32.NewProc("CoCreateInstance")
+	procCoTaskMemFree    = ole32.NewProc("CoTaskMemFree")
 )
 
 var (
 	shell32 = windows.NewLazySystemDLL("shell32.dll")
 
-	procSHBrowseForFolderW   = shell32.NewProc("SHBrowseForFolderW")
-	procSHGetPathFromIDListW = shell32.NewProc("SHGetPathFromIDListW")
+	procSHCreateItemFromParsingName = shell32.NewProc("SHCreateItemFromParsingName")
 )
-
-func _CommDlgExtendedError() uint32 {
-	r, _, _ := procCommDlgExtendedError.Call()
-	return uint32(r)
-}
 
 func _GetForegroundWindow() windows.HWND {
 	r, _, _ := procGetForegroundWindow.Call()
 	return windows.HWND(r)
-}
-
-func _GetOpenFileName(ofn *_OPENFILENAME) bool {
-	r, _, _ := procGetOpenFileNameW.Call(uintptr(unsafe.Pointer(ofn)))
-	return r != 0
-}
-
-func _GetSaveFileName(ofn *_OPENFILENAME) bool {
-	r, _, _ := procGetSaveFileNameW.Call(uintptr(unsafe.Pointer(ofn)))
-	return r != 0
 }
 
 func _MessageBox(hwnd windows.HWND, text, caption string, flags uint32) (int32, error) {
@@ -154,29 +161,139 @@ func _MessageBox(hwnd windows.HWND, text, caption string, flags uint32) (int32, 
 	return int32(r), nil
 }
 
-func _SendMessage(hwnd windows.HWND, msg uint32, wParam, lParam uintptr) uintptr {
-	r, _, _ := procSendMessageW.Call(
-		uintptr(hwnd),
-		uintptr(msg),
-		wParam,
-		lParam,
+func _CoInitializeEx(coInit uint32) _HRESULT {
+	r, _, _ := procCoInitializeEx.Call(0, uintptr(coInit))
+	return _HRESULT(uint32(r))
+}
+
+func _CoUninitialize() {
+	_, _, _ = procCoUninitialize.Call()
+}
+
+func _CoTaskMemFree(p unsafe.Pointer) {
+	_, _, _ = procCoTaskMemFree.Call(uintptr(p))
+}
+
+func _CoCreateFileDialog(clsid *windows.GUID) (*_IFileDialog, error) {
+	var dlg *_IFileDialog
+	r, _, _ := procCoCreateInstance.Call(
+		uintptr(unsafe.Pointer(clsid)),
+		0,
+		_CLSCTX_INPROC_SERVER,
+		uintptr(unsafe.Pointer(&_IID_IFileDialog)),
+		uintptr(unsafe.Pointer(&dlg)),
 	)
-	return r
-}
-
-func _SHBrowseForFolder(bi *_BROWSEINFO) uintptr {
-	r, _, _ := procSHBrowseForFolderW.Call(uintptr(unsafe.Pointer(bi)))
-	return r
-}
-
-func _SHGetPathFromIDList(idl uintptr) (string, error) {
-	buf := make([]uint16, windows.MAX_PATH)
-	r, _, err := procSHGetPathFromIDListW.Call(idl, uintptr(unsafe.Pointer(&buf[0])))
-	if r == 0 {
-		if err != nil && !errors.Is(err, windows.ERROR_SUCCESS) {
-			return "", fmt.Errorf("dialog: SHGetPathFromIDListW failed: %w", err)
-		}
-		return "", fmt.Errorf("dialog: SHGetPathFromIDListW failed: returned 0")
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return nil, fmt.Errorf("dialog: CoCreateInstance failed: %w", hr)
 	}
-	return windows.UTF16ToString(buf), nil
+	return dlg, nil
+}
+
+func _SHCreateItemFromParsingName(path string) (*_IShellItem, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	var item *_IShellItem
+	r, _, _ := procSHCreateItemFromParsingName.Call(
+		uintptr(unsafe.Pointer(p)),
+		0,
+		uintptr(unsafe.Pointer(&_IID_IShellItem)),
+		uintptr(unsafe.Pointer(&item)),
+	)
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return nil, fmt.Errorf("dialog: SHCreateItemFromParsingName failed: %w", hr)
+	}
+	return item, nil
+}
+
+func (d *_IFileDialog) Release() {
+	_, _, _ = syscall.SyscallN(d.vtbl.Release, uintptr(unsafe.Pointer(d)))
+}
+
+func (d *_IFileDialog) Show(owner windows.HWND) error {
+	r, _, _ := syscall.SyscallN(d.vtbl.Show, uintptr(unsafe.Pointer(d)), uintptr(owner))
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return fmt.Errorf("dialog: IFileDialog::Show failed: %w", hr)
+	}
+	return nil
+}
+
+func (d *_IFileDialog) GetOptions() (uint32, error) {
+	var opts uint32
+	r, _, _ := syscall.SyscallN(d.vtbl.GetOptions, uintptr(unsafe.Pointer(d)), uintptr(unsafe.Pointer(&opts)))
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return 0, fmt.Errorf("dialog: IFileDialog::GetOptions failed: %w", hr)
+	}
+	return opts, nil
+}
+
+func (d *_IFileDialog) SetOptions(opts uint32) error {
+	r, _, _ := syscall.SyscallN(d.vtbl.SetOptions, uintptr(unsafe.Pointer(d)), uintptr(opts))
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return fmt.Errorf("dialog: IFileDialog::SetOptions failed: %w", hr)
+	}
+	return nil
+}
+
+func (d *_IFileDialog) SetFolder(item *_IShellItem) error {
+	r, _, _ := syscall.SyscallN(d.vtbl.SetFolder, uintptr(unsafe.Pointer(d)), uintptr(unsafe.Pointer(item)))
+	runtime.KeepAlive(item)
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return fmt.Errorf("dialog: IFileDialog::SetFolder failed: %w", hr)
+	}
+	return nil
+}
+
+func (d *_IFileDialog) SetFileName(name *uint16) error {
+	r, _, _ := syscall.SyscallN(d.vtbl.SetFileName, uintptr(unsafe.Pointer(d)), uintptr(unsafe.Pointer(name)))
+	runtime.KeepAlive(name)
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return fmt.Errorf("dialog: IFileDialog::SetFileName failed: %w", hr)
+	}
+	return nil
+}
+
+func (d *_IFileDialog) SetTitle(title *uint16) error {
+	r, _, _ := syscall.SyscallN(d.vtbl.SetTitle, uintptr(unsafe.Pointer(d)), uintptr(unsafe.Pointer(title)))
+	runtime.KeepAlive(title)
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return fmt.Errorf("dialog: IFileDialog::SetTitle failed: %w", hr)
+	}
+	return nil
+}
+
+func (d *_IFileDialog) SetFileTypes(specs []_COMDLG_FILTERSPEC) error {
+	if len(specs) == 0 {
+		return nil
+	}
+	r, _, _ := syscall.SyscallN(d.vtbl.SetFileTypes, uintptr(unsafe.Pointer(d)), uintptr(len(specs)), uintptr(unsafe.Pointer(&specs[0])))
+	runtime.KeepAlive(specs)
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return fmt.Errorf("dialog: IFileDialog::SetFileTypes failed: %w", hr)
+	}
+	return nil
+}
+
+func (d *_IFileDialog) GetResult() (*_IShellItem, error) {
+	var item *_IShellItem
+	r, _, _ := syscall.SyscallN(d.vtbl.GetResult, uintptr(unsafe.Pointer(d)), uintptr(unsafe.Pointer(&item)))
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return nil, fmt.Errorf("dialog: IFileDialog::GetResult failed: %w", hr)
+	}
+	return item, nil
+}
+
+func (item *_IShellItem) Release() {
+	_, _, _ = syscall.SyscallN(item.vtbl.Release, uintptr(unsafe.Pointer(item)))
+}
+
+func (item *_IShellItem) GetDisplayName(sigdn uint32) (string, error) {
+	var p *uint16
+	r, _, _ := syscall.SyscallN(item.vtbl.GetDisplayName, uintptr(unsafe.Pointer(item)), uintptr(sigdn), uintptr(unsafe.Pointer(&p)))
+	if hr := _HRESULT(uint32(r)); hr.failed() {
+		return "", fmt.Errorf("dialog: IShellItem::GetDisplayName failed: %w", hr)
+	}
+	defer _CoTaskMemFree(unsafe.Pointer(p))
+	return windows.UTF16PtrToString(p), nil
 }
