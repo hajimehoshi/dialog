@@ -29,8 +29,8 @@ Asks the user for a directory.
 # platform details
 * OSX: uses Cocoa's NSAlert/NSSavePanel/NSOpenPanel/NSApp classes
     * requires macOS 10.6+ for `NSApplicationActivationPolicyAccessory`
-* Win32: uses MessageBox/GetOpenFileName/GetSaveFileName (via package github.com/TheTitanrain/w32)
-* Linux: uses Gtk's MessageDialog/FileChooserDialog (via cgo; requires gtk3 development packages)
+* Win32: uses MessageBox and the IFileDialog COM API (via package golang.org/x/sys/windows)
+* Linux and other Unix-like systems: uses Gtk's MessageDialog/FileChooserDialog (via github.com/ebitengine/purego; requires the GTK 3 runtime libraries, but no cgo or development packages)
 
 # build
 ```
