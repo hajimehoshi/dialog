@@ -31,6 +31,7 @@ Asks the user for a directory.
     * requires macOS 10.6+ for `NSApplicationActivationPolicyAccessory`
 * Win32: uses MessageBox and the IFileDialog COM API (via package golang.org/x/sys/windows)
 * Linux and other Unix-like systems: uses Gtk's MessageDialog/FileChooserDialog (via github.com/ebitengine/purego; requires the GTK 3 runtime libraries, but no cgo or development packages)
+* Browsers (js): message dialogs use `alert`/`confirm` (the title is ignored, and the Yes/No buttons appear as OK/Cancel); file and directory dialogs are not supported and return an error wrapping `errors.ErrUnsupported`
 
 # build
 ```

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: ISC
 // SPDX-FileCopyrightText: 2026 Hajime Hoshi
 
-//go:build !darwin && !windows
+//go:build !darwin && !js && !windows
 
 package dialog
 

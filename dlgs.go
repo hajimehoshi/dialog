@@ -114,7 +114,8 @@ func (b *FileBuilder) SetStartFile(startFile string) *FileBuilder {
 
 // Load spawns the file selection dialog using the configured settings,
 // asking the user to select a single file. Returns ErrCancelled as the error
-// if the user cancels or closes the dialog.
+// if the user cancels or closes the dialog. On platforms without file
+// dialogs (browsers), returns an error wrapping errors.ErrUnsupported.
 func (b *FileBuilder) Load() (string, error) {
 	return b.load()
 }
@@ -123,7 +124,8 @@ func (b *FileBuilder) Load() (string, error) {
 // asking the user for a filename to save as. If the chosen file exists, the
 // user is prompted whether they want to overwrite the file. Returns
 // ErrCancelled as the error if the user cancels/closes the dialog, or selects
-// not to overwrite the file.
+// not to overwrite the file. On platforms without file dialogs (browsers),
+// returns an error wrapping errors.ErrUnsupported.
 func (b *FileBuilder) Save() (string, error) {
 	return b.save()
 }
@@ -141,7 +143,8 @@ func Directory() *DirectoryBuilder {
 
 // Browse spawns the directory selection dialog using the configured settings,
 // asking the user to select a single folder. Returns ErrCancelled as the error
-// if the user cancels or closes the dialog.
+// if the user cancels or closes the dialog. On platforms without directory
+// dialogs (browsers), returns an error wrapping errors.ErrUnsupported.
 func (b *DirectoryBuilder) Browse() (string, error) {
 	return b.browse()
 }
